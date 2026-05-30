@@ -72,15 +72,19 @@ The multi-symbol service uses a shared process-local `WeightedRateLimiter`. For 
 ```python
 from binance_klines_data_fetch import (
     MultiSymbolKlineService,
+    get_um_futures_classification_maps,
     get_um_perpetual_symbols,
     get_um_perpetual_symbol_info,
 )
 
 symbols = get_um_perpetual_symbols()
 info = get_um_perpetual_symbol_info()
+classifications = get_um_futures_classification_maps()
 
 print(len(symbols))
 print(info[["symbol", "baseAsset", "quoteAsset"]].head())
+print(classifications["underlyingType"].keys())
+print(classifications["underlyingSubType"].get("AI", [])[:10])
 
 service = MultiSymbolKlineService.for_um_perpetual_market(
     window_size=100,
@@ -96,6 +100,7 @@ finally:
 ```
 
 The full-market helpers read Binance USD-M `/fapi/v1/exchangeInfo` and keep only symbols where `contractType == "PERPETUAL"` and `status == "TRADING"`.
+The classification helper uses the same endpoint and groups `TRADING` `PERPETUAL` and `TRADIFI_PERPETUAL` contracts by Binance `underlyingType` and `underlyingSubType`; untagged subtype values are grouped under `UNKNOWN`.
 
 ## Returned DataFrame
 
