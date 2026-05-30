@@ -67,6 +67,36 @@ finally:
 
 The multi-symbol service uses a shared process-local `WeightedRateLimiter`. For Binance USD-M `/fapi/v1/klines`, request weight is based on `limit`: `<100 => 1`, `100..499 => 2`, `500..1000 => 5`, and `>1000 => 10`. The Binance single-request `limit` max is still 1500; larger windows are paginated.
 
+## Full USD-M Perpetual Market
+
+```python
+from binance_klines_data_fetch import (
+    MultiSymbolKlineService,
+    get_um_perpetual_symbols,
+    get_um_perpetual_symbol_info,
+)
+
+symbols = get_um_perpetual_symbols()
+info = get_um_perpetual_symbol_info()
+
+print(len(symbols))
+print(info[["symbol", "baseAsset", "quoteAsset"]].head())
+
+service = MultiSymbolKlineService.for_um_perpetual_market(
+    window_size=100,
+    max_workers=8,
+)
+service.start(block_until_ready=True, timeout=180)
+
+try:
+    latest = service.get_all_recent(1)
+    print(latest.keys())
+finally:
+    service.stop()
+```
+
+The full-market helpers read Binance USD-M `/fapi/v1/exchangeInfo` and keep only symbols where `contractType == "PERPETUAL"` and `status == "TRADING"`.
+
 ## Returned DataFrame
 
 - Index: UTC `DatetimeIndex`, name `Open_Time`, ascending.

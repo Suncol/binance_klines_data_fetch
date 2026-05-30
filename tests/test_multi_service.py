@@ -23,6 +23,30 @@ class MultiFakeClient:
         self.configure_called += 1
         return 2400
 
+    def fetch_exchange_info(self):
+        return {
+            "symbols": [
+                {
+                    "symbol": "BTCUSDT",
+                    "contractType": "PERPETUAL",
+                    "status": "TRADING",
+                    "quoteAsset": "USDT",
+                },
+                {
+                    "symbol": "ETHUSDT",
+                    "contractType": "PERPETUAL",
+                    "status": "TRADING",
+                    "quoteAsset": "USDT",
+                },
+                {
+                    "symbol": "BTCUSDT_260327",
+                    "contractType": "CURRENT_QUARTER",
+                    "status": "TRADING",
+                    "quoteAsset": "USDT",
+                },
+            ]
+        }
+
     def latest_closed_1m_open_time_ms(self):
         return self.latest_open
 
@@ -109,6 +133,20 @@ class MultiSymbolKlineServiceTests(unittest.TestCase):
         service.refresh_once()
 
         self.assertEqual(client.configure_called, 1)
+
+    def test_for_um_perpetual_market_uses_exchange_info_symbols(self):
+        client = MultiFakeClient()
+        service = MultiSymbolKlineService.for_um_perpetual_market(
+            window_size=2,
+            client=client,
+            auto_configure_rate_limit=False,
+        )
+
+        result = service.refresh_once()
+
+        self.assertEqual(set(service.status().symbols), {"BTCUSDT", "ETHUSDT"})
+        self.assertTrue(result["BTCUSDT"])
+        self.assertTrue(result["ETHUSDT"])
 
 
 if __name__ == "__main__":

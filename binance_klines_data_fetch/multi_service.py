@@ -19,10 +19,53 @@ from .models import (
     SymbolKlineStatus,
 )
 from .rate_limiter import WeightedRateLimiter
+from .symbols import get_um_perpetual_symbols
 
 
 class MultiSymbolKlineService:
     """Maintain rolling closed-1m kline caches for multiple symbols."""
+
+    @classmethod
+    def for_um_perpetual_market(
+        cls,
+        *,
+        window_size: int,
+        quote_assets: Optional[Iterable[str]] = None,
+        client: Optional[BinanceKlineClient] = None,
+        rate_limiter: Optional[WeightedRateLimiter] = None,
+        request_weight_limit_per_minute: Optional[int] = None,
+        auto_configure_rate_limit: bool = True,
+        max_workers: Optional[int] = None,
+        refresh_interval_seconds: float = 2.0,
+        max_backoff_seconds: float = 30.0,
+        startup_timeout_seconds: float = 30.0,
+        bootstrap_chunk_limit: int = 499,
+    ) -> "MultiSymbolKlineService":
+        if rate_limiter is None and client is not None:
+            rate_limiter = getattr(client, "rate_limiter", None)
+        if rate_limiter is None:
+            rate_limiter = WeightedRateLimiter(
+                limit=request_weight_limit_per_minute or DEFAULT_REQUEST_WEIGHT_LIMIT_PER_MINUTE
+            )
+        if client is None:
+            client = BinanceKlineClient(rate_limiter=rate_limiter)
+        elif hasattr(client, "rate_limiter"):
+            client.rate_limiter = rate_limiter
+
+        symbols = get_um_perpetual_symbols(client=client, quote_assets=quote_assets)
+        return cls(
+            symbols=symbols,
+            window_size=window_size,
+            client=client,
+            rate_limiter=rate_limiter,
+            request_weight_limit_per_minute=request_weight_limit_per_minute,
+            auto_configure_rate_limit=auto_configure_rate_limit,
+            max_workers=max_workers,
+            refresh_interval_seconds=refresh_interval_seconds,
+            max_backoff_seconds=max_backoff_seconds,
+            startup_timeout_seconds=startup_timeout_seconds,
+            bootstrap_chunk_limit=bootstrap_chunk_limit,
+        )
 
     def __init__(
         self,

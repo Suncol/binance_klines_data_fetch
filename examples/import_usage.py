@@ -9,6 +9,7 @@ from binance_klines_data_fetch import (
     BinanceKlineService,
     MultiSymbolKlineService,
     fetch_recent_closed_1m_klines,
+    get_um_perpetual_symbols,
 )
 
 
@@ -35,6 +36,20 @@ def multi_symbol_background_service() -> None:
         service.start(block_until_ready=True)
         print(service.get_recent("BTCUSDT", 10).tail(1))
         print(service.get_all_recent(10).keys())
+    finally:
+        service.stop()
+
+
+def full_um_perpetual_market_service() -> None:
+    symbols = get_um_perpetual_symbols()
+    print(f"loaded {len(symbols)} USD-M perpetual symbols")
+
+    service = MultiSymbolKlineService.for_um_perpetual_market(window_size=20, max_workers=8)
+    try:
+        service.start(block_until_ready=True, timeout=180)
+        latest = service.get_all_recent(1)
+        for symbol, df in list(latest.items())[:10]:
+            print(symbol, df.index[-1], float(df["Close"].iloc[-1]))
     finally:
         service.stop()
 
