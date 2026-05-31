@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal, Optional
 
+import numpy as np
+import pandas as pd
 import websockets
 from websockets.exceptions import ConnectionClosed
 
@@ -265,6 +267,34 @@ class BinanceOptionsDepthService:
             return None
         return quote.value(normalized_side, normalized_field)
 
+    def get_latest_depth_frame(
+        self,
+        levels: Optional[int] = None,
+        *,
+        include_status: bool = True,
+        require_sequence_continuity: bool = False,
+        max_age_ms: Optional[int] = None,
+    ) -> pd.DataFrame:
+        frame_levels = validate_depth_level(
+            levels if levels is not None else int(self.config.levels),
+            max_level=int(self.config.levels),
+        )
+        max_age_ms = validate_max_age_ms(max_age_ms)
+        rows = [
+            self._depth_frame_row(
+                symbol,
+                levels=frame_levels,
+                include_status=include_status,
+                require_sequence_continuity=require_sequence_continuity,
+                max_age_ms=max_age_ms,
+            )
+            for symbol in self.config.symbols
+        ]
+        return pd.DataFrame(
+            rows,
+            index=pd.Index(self.config.symbols, name="symbol"),
+        )
+
     def get_all_latest(self) -> dict[str, OptionsDepthSnapshot]:
         with self._lock:
             return dict(self._snapshots)
@@ -320,6 +350,56 @@ class BinanceOptionsDepthService:
         if max_age_ms is not None and utc_now_ms() - snapshot.local_recv_time_ms > max_age_ms:
             return False
         return True
+
+    def _depth_frame_row(
+        self,
+        symbol: str,
+        *,
+        levels: int,
+        include_status: bool,
+        require_sequence_continuity: bool,
+        max_age_ms: Optional[int],
+    ) -> dict[str, Any]:
+        snapshot = self.get_latest(symbol)
+        has_snapshot = snapshot is not None
+        is_stale = True if snapshot is None else snapshot.is_stale
+        sequence_gap = False if snapshot is None else snapshot.sequence_gap
+        depth_incomplete = True if snapshot is None else snapshot.depth_incomplete
+        can_use_numeric_data = (
+            snapshot is not None
+            and self._snapshot_passes_level_filters(
+                snapshot,
+                require_not_stale=True,
+                require_sequence_continuity=require_sequence_continuity,
+                max_age_ms=max_age_ms,
+            )
+        )
+
+        row: dict[str, Any] = {}
+        for level in range(1, levels + 1):
+            if can_use_numeric_data:
+                quote = snapshot.get_level_quote(level)
+                row[f"bid{level}"] = _decimal_or_nan(quote.bid_price)
+                row[f"bid{level}_qty"] = _decimal_or_nan(quote.bid_qty)
+                row[f"ask{level}"] = _decimal_or_nan(quote.ask_price)
+                row[f"ask{level}_qty"] = _decimal_or_nan(quote.ask_qty)
+            else:
+                row[f"bid{level}"] = np.nan
+                row[f"bid{level}_qty"] = np.nan
+                row[f"ask{level}"] = np.nan
+                row[f"ask{level}_qty"] = np.nan
+
+        if include_status:
+            row.update(
+                {
+                    "has_snapshot": has_snapshot,
+                    "is_stale": is_stale,
+                    "sequence_gap": sequence_gap,
+                    "depth_incomplete": depth_incomplete,
+                }
+            )
+
+        return row
 
     def _wait_until_ready(self, timeout: Optional[float]) -> None:
         wait_timeout = self.config.startup_timeout_seconds if timeout is None else timeout
@@ -630,6 +710,10 @@ def _normalize_option_symbols(symbols: Iterable[str | OptionSymbol]) -> tuple[st
         seen.add(normalized)
         normalized_symbols.append(normalized)
     return tuple(normalized_symbols)
+
+
+def _decimal_or_nan(value: Optional[Decimal]) -> Decimal | float:
+    return value if value is not None else np.nan
 
 
 def _parse_price_qty_array(

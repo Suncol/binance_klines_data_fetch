@@ -5,6 +5,8 @@ import unittest
 from dataclasses import replace
 from decimal import Decimal
 
+import pandas as pd
+
 from binance_klines_data_fetch import (
     BinanceDepthConfig,
     BinanceDepthResponseError,
@@ -243,6 +245,87 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
             service.get_latest_level_value("BTCUSDT", side="bid", field="size")
         with self.assertRaises(ValueError):
             service.get_latest_level_quote("BTCUSDT", max_age_ms=-1)
+
+    def test_latest_depth_frame_keeps_all_symbols_and_uses_nan_for_missing_data(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT", "ETHUSDT"], levels=5))
+        service._handle_raw_message(json.dumps(make_depth_payload(symbol="BTCUSDT")))
+
+        frame = service.get_latest_depth_frame(levels=2)
+
+        self.assertEqual(list(frame.index), ["BTCUSDT", "ETHUSDT"])
+        self.assertEqual(frame.index.name, "symbol")
+        self.assertEqual(
+            list(frame.columns),
+            [
+                "bid1",
+                "bid1_qty",
+                "ask1",
+                "ask1_qty",
+                "bid2",
+                "bid2_qty",
+                "ask2",
+                "ask2_qty",
+                "has_snapshot",
+                "is_stale",
+                "sequence_gap",
+                "depth_incomplete",
+            ],
+        )
+        self.assertEqual(frame.loc["BTCUSDT", "bid1"], Decimal("101.0"))
+        self.assertEqual(frame.loc["BTCUSDT", "bid1_qty"], Decimal("2.5"))
+        self.assertEqual(frame.loc["BTCUSDT", "ask2"], Decimal("102.0"))
+        self.assertTrue(frame.loc["BTCUSDT", "has_snapshot"])
+        self.assertFalse(frame.loc["BTCUSDT", "is_stale"])
+        self.assertFalse(frame.loc["BTCUSDT", "sequence_gap"])
+        self.assertFalse(frame.loc["BTCUSDT", "depth_incomplete"])
+        self.assertTrue(pd.isna(frame.loc["ETHUSDT", "bid1"]))
+        self.assertTrue(pd.isna(frame.loc["ETHUSDT", "ask2_qty"]))
+        self.assertFalse(frame.loc["ETHUSDT", "has_snapshot"])
+        self.assertTrue(frame.loc["ETHUSDT", "is_stale"])
+        self.assertTrue(frame.loc["ETHUSDT", "depth_incomplete"])
+
+    def test_latest_depth_frame_uses_nan_for_stale_gap_and_age_filters(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
+        service._record_connected()
+        service._handle_raw_message(json.dumps(make_depth_payload(final_update_id=12, previous_final_update_id=9)))
+
+        service._mark_all_stale("connection_closed")
+        stale_frame = service.get_latest_depth_frame(levels=1)
+
+        self.assertTrue(pd.isna(stale_frame.loc["BTCUSDT", "bid1"]))
+        self.assertTrue(stale_frame.loc["BTCUSDT", "has_snapshot"])
+        self.assertTrue(stale_frame.loc["BTCUSDT", "is_stale"])
+
+        service._handle_raw_message(
+            json.dumps(make_depth_payload(first_update_id=13, final_update_id=14, previous_final_update_id=11))
+        )
+        gap_frame = service.get_latest_depth_frame(levels=1, require_sequence_continuity=True)
+
+        self.assertTrue(pd.isna(gap_frame.loc["BTCUSDT", "bid1"]))
+        self.assertTrue(gap_frame.loc["BTCUSDT", "sequence_gap"])
+
+        snapshot = service.get_latest("BTCUSDT")
+        self.assertIsNotNone(snapshot)
+        service._snapshots["BTCUSDT"] = replace(snapshot, local_recv_time_ms=0, sequence_gap=False)
+        old_frame = service.get_latest_depth_frame(levels=1, max_age_ms=1)
+
+        self.assertTrue(pd.isna(old_frame.loc["BTCUSDT", "bid1"]))
+        self.assertFalse(old_frame.loc["BTCUSDT", "is_stale"])
+
+    def test_latest_depth_frame_options(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
+        service._handle_raw_message(json.dumps(make_depth_payload()))
+
+        frame = service.get_latest_depth_frame(levels=1, include_status=False)
+
+        self.assertEqual(list(frame.columns), ["bid1", "bid1_qty", "ask1", "ask1_qty"])
+
+        with self.assertRaises(ValueError):
+            service.get_latest_depth_frame(levels=0)
+        with self.assertRaises(ValueError):
+            service.get_latest_depth_frame(levels=6)
+        with self.assertRaises(ValueError):
+            service.get_latest_depth_frame(max_age_ms=-1)
 
 
 if __name__ == "__main__":

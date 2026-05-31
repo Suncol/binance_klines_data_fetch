@@ -16,7 +16,7 @@ Independent Python module for fetching Binance USD-M Futures closed 1-minute kli
 pip install -r requirements.txt
 ```
 
-The current local `.venv` already contains `requests` and `pandas`, so tests can run without installing anything.
+The current local `.venv` already contains `requests`, `numpy`, and `pandas`, so tests can run without installing anything.
 
 ## One-Shot Fetch
 
@@ -124,11 +124,14 @@ try:
     )
     if quote is not None:
         print(quote.bid_price, quote.bid_qty, quote.ask_price, quote.ask_qty)
+
+    depth_frame = service.get_latest_depth_frame(levels=2)
+    print(depth_frame[["bid1", "bid1_qty", "ask1", "ask1_qty", "is_stale"]])
 finally:
     service.stop()
 ```
 
-The depth service uses Binance USD-M Futures partial book depth streams, not diff-depth local order book reconstruction. Supported `levels` values are `5`, `10`, and `20`; supported `speed_ms` values are `100`, `250`, and `500`. `speed_ms=250` maps to the no-suffix stream name such as `btcusdt@depth5`. The service keeps only the latest in-memory snapshot per symbol and marks snapshots stale on disconnect, timeout, or stop. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. Use `get_latest_level_quote(symbol, level=n)` or `get_latest_level_value(symbol, side, level=n, field=...)` to read the latest nth bid/ask price or quantity; these accessors return `None` when the snapshot is missing or stale by default. The service does not write CSV, Parquet, database rows, or any periodic sampler output.
+The depth service uses Binance USD-M Futures partial book depth streams, not diff-depth local order book reconstruction. Supported `levels` values are `5`, `10`, and `20`; supported `speed_ms` values are `100`, `250`, and `500`. `speed_ms=250` maps to the no-suffix stream name such as `btcusdt@depth5`. The service keeps only the latest in-memory snapshot per symbol and marks snapshots stale on disconnect, timeout, or stop. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. Use `get_latest_level_quote(symbol, level=n)` or `get_latest_level_value(symbol, side, level=n, field=...)` to read the latest nth bid/ask price or quantity; these accessors return `None` when the snapshot is missing or stale by default. Use `get_latest_depth_frame(levels=n)` to get a `DataFrame` indexed by subscribed symbols with columns such as `bid1`, `bid1_qty`, `ask1`, `ask1_qty`; missing, stale, sequence-filtered, or age-filtered numeric cells are `np.nan`. The service does not write CSV, Parquet, database rows, or any periodic sampler output.
 
 ## Binance Options Symbols
 
@@ -218,11 +221,14 @@ try:
             quote.ask_qty,
             quote.depth_incomplete,
         )
+
+    depth_frame = service.get_latest_depth_frame(levels=2)
+    print(depth_frame[["bid1", "bid1_qty", "ask1", "ask1_qty", "depth_incomplete"]])
 finally:
     service.stop()
 ```
 
-The Options depth service uses Binance Options partial book depth streams. It stores the latest in-memory top-N snapshot per option symbol and tracks sequence gaps with `U/u/pu`. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. A thin or inactive option can still have no snapshot yet, so `get_latest_level_quote()` returns `None` until that contract has a non-stale snapshot. Options order books are often thin; if the nth bid or ask side does not exist, the returned quote keeps that side's price and quantity as `None` and carries `depth_incomplete=True`.
+The Options depth service uses Binance Options partial book depth streams. It stores the latest in-memory top-N snapshot per option symbol and tracks sequence gaps with `U/u/pu`. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. A thin or inactive option can still have no snapshot yet, so `get_latest_level_quote()` returns `None` until that contract has a non-stale snapshot. Options order books are often thin; if the nth bid or ask side does not exist, the returned quote keeps that side's price and quantity as `None` and carries `depth_incomplete=True`. The `get_latest_depth_frame(levels=n)` helper keeps every subscribed option symbol in the index and uses `np.nan` for unavailable numeric cells, including stale snapshots and missing bid/ask levels.
 
 ## Returned DataFrame
 
