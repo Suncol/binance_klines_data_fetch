@@ -1,0 +1,8 @@
+*
+!.gitignore
+!binance_klines_data_fetch/
+!binance_klines_data_fetch/depth.py
+!tests/
+!tests/test_depth.py
+!examples/
+!examples/depth_service_jupyter_example.ipynb

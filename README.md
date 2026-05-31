@@ -102,6 +102,34 @@ finally:
 The full-market helpers read Binance USD-M `/fapi/v1/exchangeInfo` and keep only symbols where `contractType == "PERPETUAL"` and `status == "TRADING"`.
 The classification helper uses the same endpoint and groups `TRADING` `PERPETUAL` and `TRADIFI_PERPETUAL` contracts by Binance `underlyingType` and `underlyingSubType`; untagged subtype values are grouped under `UNKNOWN`.
 
+## Futures Partial Depth Background Cache
+
+```python
+from binance_klines_data_fetch import BinanceDepthConfig, BinanceFuturesDepthService
+
+service = BinanceFuturesDepthService(
+    BinanceDepthConfig(
+        symbols=["BTCUSDT", "ETHUSDT"],
+        levels=5,
+        speed_ms=100,
+    )
+)
+service.start(block_until_ready=True)
+
+try:
+    snapshot = service.get_latest("BTCUSDT")
+    if snapshot is not None and not snapshot.is_stale and not snapshot.sequence_gap:
+        bid1 = snapshot.bids[0]
+        bid2 = snapshot.bids[1]
+        ask1 = snapshot.asks[0]
+        ask2 = snapshot.asks[1]
+        print(bid1, bid2, ask1, ask2)
+finally:
+    service.stop()
+```
+
+The depth service uses Binance USD-M Futures partial book depth streams, not diff-depth local order book reconstruction. Supported `levels` values are `5`, `10`, and `20`; supported `speed_ms` values are `100`, `250`, and `500`. `speed_ms=250` maps to the no-suffix stream name such as `btcusdt@depth5`. The service keeps only the latest in-memory snapshot per symbol and marks snapshots stale on disconnect, timeout, or stop. It does not write CSV, Parquet, database rows, or any periodic sampler output.
+
 ## Returned DataFrame
 
 - Index: UTC `DatetimeIndex`, name `Open_Time`, ascending.

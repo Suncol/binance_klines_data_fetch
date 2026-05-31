@@ -36,3 +36,15 @@ class BinanceAPIError(BinanceKlineError):
 
 class KlineServiceError(BinanceKlineError):
     """Raised for background service lifecycle and readiness errors."""
+
+
+class BinanceDepthError(BinanceKlineError):
+    """Base exception for futures depth stream handling."""
+
+
+class BinanceDepthResponseError(BinanceDepthError):
+    """Raised when a futures depth stream message is malformed."""
+
+
+class DepthServiceError(BinanceDepthError):
+    """Raised for background futures depth service lifecycle errors."""
