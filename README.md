@@ -117,18 +117,18 @@ service = BinanceFuturesDepthService(
 service.start(block_until_ready=True)
 
 try:
-    snapshot = service.get_latest("BTCUSDT")
-    if snapshot is not None and not snapshot.is_stale and not snapshot.sequence_gap:
-        bid1 = snapshot.bids[0]
-        bid2 = snapshot.bids[1]
-        ask1 = snapshot.asks[0]
-        ask2 = snapshot.asks[1]
-        print(bid1, bid2, ask1, ask2)
+    quote = service.get_latest_level_quote(
+        "BTCUSDT",
+        level=2,
+        require_sequence_continuity=True,
+    )
+    if quote is not None:
+        print(quote.bid_price, quote.bid_qty, quote.ask_price, quote.ask_qty)
 finally:
     service.stop()
 ```
 
-The depth service uses Binance USD-M Futures partial book depth streams, not diff-depth local order book reconstruction. Supported `levels` values are `5`, `10`, and `20`; supported `speed_ms` values are `100`, `250`, and `500`. `speed_ms=250` maps to the no-suffix stream name such as `btcusdt@depth5`. The service keeps only the latest in-memory snapshot per symbol and marks snapshots stale on disconnect, timeout, or stop. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. Always check `get_latest(symbol)` and the snapshot-level `is_stale` / `sequence_gap` flags before using a specific symbol. The service does not write CSV, Parquet, database rows, or any periodic sampler output.
+The depth service uses Binance USD-M Futures partial book depth streams, not diff-depth local order book reconstruction. Supported `levels` values are `5`, `10`, and `20`; supported `speed_ms` values are `100`, `250`, and `500`. `speed_ms=250` maps to the no-suffix stream name such as `btcusdt@depth5`. The service keeps only the latest in-memory snapshot per symbol and marks snapshots stale on disconnect, timeout, or stop. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. Use `get_latest_level_quote(symbol, level=n)` or `get_latest_level_value(symbol, side, level=n, field=...)` to read the latest nth bid/ask price or quantity; these accessors return `None` when the snapshot is missing or stale by default. The service does not write CSV, Parquet, database rows, or any periodic sampler output.
 
 ## Binance Options Symbols
 
@@ -204,18 +204,25 @@ service = BinanceOptionsDepthService(
 service.start(block_until_ready=True)
 
 try:
-    snapshot = service.get_latest(selected[0].symbol)
-    if snapshot is not None and not snapshot.is_stale and not snapshot.sequence_gap:
-        bid1 = snapshot.bids[0] if len(snapshot.bids) > 0 else None
-        bid2 = snapshot.bids[1] if len(snapshot.bids) > 1 else None
-        ask1 = snapshot.asks[0] if len(snapshot.asks) > 0 else None
-        ask2 = snapshot.asks[1] if len(snapshot.asks) > 1 else None
-        print(snapshot.symbol, bid1, bid2, ask1, ask2, snapshot.depth_incomplete)
+    quote = service.get_latest_level_quote(
+        selected[0],
+        level=2,
+        require_sequence_continuity=True,
+    )
+    if quote is not None:
+        print(
+            quote.symbol,
+            quote.bid_price,
+            quote.bid_qty,
+            quote.ask_price,
+            quote.ask_qty,
+            quote.depth_incomplete,
+        )
 finally:
     service.stop()
 ```
 
-The Options depth service uses Binance Options partial book depth streams. It stores the latest in-memory top-N snapshot per option symbol and tracks sequence gaps with `U/u/pu`. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. A thin or inactive option can still have no snapshot yet, so always check `get_latest(symbol)` before using a specific contract. Options order books are often thin, so `depth_incomplete=True` is normal; always check `len(snapshot.bids)` and `len(snapshot.asks)` before reading bid2 or ask2.
+The Options depth service uses Binance Options partial book depth streams. It stores the latest in-memory top-N snapshot per option symbol and tracks sequence gaps with `U/u/pu`. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. A thin or inactive option can still have no snapshot yet, so `get_latest_level_quote()` returns `None` until that contract has a non-stale snapshot. Options order books are often thin; if the nth bid or ask side does not exist, the returned quote keeps that side's price and quantity as `None` and carries `depth_incomplete=True`.
 
 ## Returned DataFrame
 

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from decimal import Decimal
 
 from binance_klines_data_fetch import (
     BinanceDepthConfig,
     BinanceDepthResponseError,
     BinanceFuturesDepthService,
+    DepthLevelQuote,
     DepthSnapshot,
 )
 
@@ -171,6 +173,76 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
         table.clear()
 
         self.assertIsNotNone(service.get_latest("BTCUSDT"))
+
+    def test_latest_level_quote_and_value_accessors(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
+
+        self.assertIsNone(service.get_latest_level_quote("BTCUSDT", level=1))
+
+        service._handle_raw_message(json.dumps(make_depth_payload()))
+
+        quote = service.get_latest_level_quote("btcusdt", level=2)
+
+        self.assertIsInstance(quote, DepthLevelQuote)
+        self.assertEqual(quote.symbol, "BTCUSDT")
+        self.assertEqual(quote.level, 2)
+        self.assertEqual(quote.bid_price, Decimal("100.0"))
+        self.assertEqual(quote.bid_qty, Decimal("1.5"))
+        self.assertEqual(quote.ask_price, Decimal("102.0"))
+        self.assertEqual(quote.ask_qty, Decimal("1.0"))
+        self.assertIsNone(quote.depth_incomplete)
+        self.assertEqual(quote.value("bid", "price"), Decimal("100.0"))
+        self.assertEqual(quote.value("ask", "qty"), Decimal("1.0"))
+        self.assertEqual(
+            service.get_latest_level_value("BTCUSDT", side="BID", level=2, field="PRICE"),
+            Decimal("100.0"),
+        )
+        self.assertEqual(
+            service.get_latest_level_value("BTCUSDT", side="ask", level=2, field="qty"),
+            Decimal("1.0"),
+        )
+
+    def test_latest_level_accessors_filter_stale_gap_and_age(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
+        service._record_connected()
+        service._handle_raw_message(json.dumps(make_depth_payload(final_update_id=12, previous_final_update_id=9)))
+
+        self.assertIsNotNone(service.get_latest_level_quote("BTCUSDT"))
+
+        service._mark_all_stale("connection_closed")
+
+        self.assertIsNone(service.get_latest_level_quote("BTCUSDT"))
+        stale_quote = service.get_latest_level_quote("BTCUSDT", require_not_stale=False)
+        self.assertIsNotNone(stale_quote)
+        self.assertTrue(stale_quote.is_stale)
+
+        service._handle_raw_message(
+            json.dumps(make_depth_payload(first_update_id=13, final_update_id=14, previous_final_update_id=11))
+        )
+
+        self.assertIsNotNone(service.get_latest_level_quote("BTCUSDT"))
+        self.assertIsNone(service.get_latest_level_quote("BTCUSDT", require_sequence_continuity=True))
+
+        snapshot = service.get_latest("BTCUSDT")
+        self.assertIsNotNone(snapshot)
+        service._snapshots["BTCUSDT"] = replace(snapshot, local_recv_time_ms=0, sequence_gap=False)
+
+        self.assertIsNone(service.get_latest_level_quote("BTCUSDT", max_age_ms=1))
+
+    def test_latest_level_accessors_validate_inputs(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
+        service._handle_raw_message(json.dumps(make_depth_payload()))
+
+        with self.assertRaises(ValueError):
+            service.get_latest_level_quote("BTCUSDT", level=0)
+        with self.assertRaises(ValueError):
+            service.get_latest_level_quote("BTCUSDT", level=6)
+        with self.assertRaises(ValueError):
+            service.get_latest_level_value("BTCUSDT", side="middle")
+        with self.assertRaises(ValueError):
+            service.get_latest_level_value("BTCUSDT", side="bid", field="size")
+        with self.assertRaises(ValueError):
+            service.get_latest_level_quote("BTCUSDT", max_age_ms=-1)
 
 
 if __name__ == "__main__":

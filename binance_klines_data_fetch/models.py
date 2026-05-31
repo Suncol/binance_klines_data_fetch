@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Optional
+from decimal import Decimal
+from typing import Dict, Literal, Optional, cast
 
 DEFAULT_BASE_URL = "https://fapi.binance.com"
 KLINE_PATH = "/fapi/v1/klines"
@@ -56,6 +57,68 @@ NUMERIC_KLINE_COLUMNS = [
     "Taker_Buy_Base_Asset_Volume",
     "Taker_Buy_Quote_Asset_Volume",
 ]
+
+DepthSide = Literal["bid", "ask"]
+DepthValueField = Literal["price", "qty"]
+
+
+@dataclass(frozen=True)
+class DepthLevelQuote:
+    symbol: str
+    level: int
+    bid_price: Optional[Decimal]
+    bid_qty: Optional[Decimal]
+    ask_price: Optional[Decimal]
+    ask_qty: Optional[Decimal]
+    event_time_ms: int
+    transaction_time_ms: int
+    local_recv_time_ms: int
+    receive_latency_ms: int
+    final_update_id: int
+    is_stale: bool
+    sequence_gap: bool
+    depth_incomplete: Optional[bool] = None
+
+    def value(self, side: DepthSide, field: DepthValueField) -> Optional[Decimal]:
+        normalized_side = normalize_depth_side(side)
+        normalized_field = normalize_depth_value_field(field)
+        if normalized_side == "bid":
+            return self.bid_price if normalized_field == "price" else self.bid_qty
+        return self.ask_price if normalized_field == "price" else self.ask_qty
+
+
+def normalize_depth_side(side: str) -> DepthSide:
+    if not isinstance(side, str):
+        raise ValueError("side must be 'bid' or 'ask'")
+    normalized = side.strip().lower()
+    if normalized not in {"bid", "ask"}:
+        raise ValueError("side must be 'bid' or 'ask'")
+    return cast(DepthSide, normalized)
+
+
+def normalize_depth_value_field(field: str) -> DepthValueField:
+    if not isinstance(field, str):
+        raise ValueError("field must be 'price' or 'qty'")
+    normalized = field.strip().lower()
+    if normalized not in {"price", "qty"}:
+        raise ValueError("field must be 'price' or 'qty'")
+    return cast(DepthValueField, normalized)
+
+
+def validate_depth_level(level: int, *, max_level: Optional[int] = None) -> int:
+    if isinstance(level, bool) or not isinstance(level, int) or level < 1:
+        raise ValueError("level must be a positive integer")
+    if max_level is not None and level > max_level:
+        raise ValueError(f"level must be <= {max_level}")
+    return level
+
+
+def validate_max_age_ms(max_age_ms: Optional[int]) -> Optional[int]:
+    if max_age_ms is None:
+        return None
+    if isinstance(max_age_ms, bool) or not isinstance(max_age_ms, int) or max_age_ms < 0:
+        raise ValueError("max_age_ms must be a non-negative integer or None")
+    return max_age_ms
 
 
 @dataclass(frozen=True)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from dataclasses import replace
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -10,6 +11,7 @@ from binance_klines_data_fetch import (
     BinanceDepthResponseError,
     BinanceOptionsDepthConfig,
     BinanceOptionsDepthService,
+    DepthLevelQuote,
     OptionDepthPriceLevel,
     OptionsDepthSnapshot,
     build_options_depth_service_configs,
@@ -258,6 +260,81 @@ class BinanceOptionsDepthServiceTests(unittest.TestCase):
         table.clear()
 
         self.assertIsNotNone(service.get_latest("BTC-251226-110000-C"))
+
+    def test_latest_level_quote_handles_sparse_options_book(self):
+        option_symbol = parse_option_symbol_record(make_option_record())
+        service = BinanceOptionsDepthService(BinanceOptionsDepthConfig(symbols=[option_symbol], levels=5))
+        payload = make_options_depth_payload(
+            bids=[],
+            asks=[
+                ["1300.000", "0.6000"],
+                ["1250.000", "0.2000"],
+            ],
+        )
+
+        self.assertIsNone(service.get_latest_level_quote(option_symbol, level=1))
+
+        service._handle_raw_message(json.dumps(payload))
+
+        quote = service.get_latest_level_quote(option_symbol, level=2)
+
+        self.assertIsInstance(quote, DepthLevelQuote)
+        self.assertEqual(quote.symbol, "BTC-251226-110000-C")
+        self.assertEqual(quote.level, 2)
+        self.assertIsNone(quote.bid_price)
+        self.assertIsNone(quote.bid_qty)
+        self.assertEqual(quote.ask_price, Decimal("1300.000"))
+        self.assertEqual(quote.ask_qty, Decimal("0.6000"))
+        self.assertTrue(quote.depth_incomplete)
+        self.assertEqual(
+            service.get_latest_level_value(option_symbol, side="ask", level=2, field="qty"),
+            Decimal("0.6000"),
+        )
+        self.assertIsNone(service.get_latest_level_value(option_symbol, side="bid", level=1, field="price"))
+
+    def test_latest_level_accessors_filter_stale_gap_and_age(self):
+        service = BinanceOptionsDepthService(BinanceOptionsDepthConfig(symbols=["BTC-251226-110000-C"], levels=5))
+        service._record_connected()
+        service._handle_raw_message(json.dumps(make_options_depth_payload(final_update_id=12, previous_final_update_id=9)))
+
+        self.assertIsNotNone(service.get_latest_level_quote("BTC-251226-110000-C"))
+
+        service._mark_all_stale("connection_closed")
+
+        self.assertIsNone(service.get_latest_level_quote("BTC-251226-110000-C"))
+        stale_quote = service.get_latest_level_quote("BTC-251226-110000-C", require_not_stale=False)
+        self.assertIsNotNone(stale_quote)
+        self.assertTrue(stale_quote.is_stale)
+
+        service._handle_raw_message(
+            json.dumps(make_options_depth_payload(first_update_id=13, final_update_id=14, previous_final_update_id=11))
+        )
+
+        self.assertIsNotNone(service.get_latest_level_quote("BTC-251226-110000-C"))
+        self.assertIsNone(
+            service.get_latest_level_quote("BTC-251226-110000-C", require_sequence_continuity=True)
+        )
+
+        snapshot = service.get_latest("BTC-251226-110000-C")
+        self.assertIsNotNone(snapshot)
+        service._snapshots["BTC-251226-110000-C"] = replace(snapshot, local_recv_time_ms=0, sequence_gap=False)
+
+        self.assertIsNone(service.get_latest_level_quote("BTC-251226-110000-C", max_age_ms=1))
+
+    def test_latest_level_accessors_validate_inputs(self):
+        service = BinanceOptionsDepthService(BinanceOptionsDepthConfig(symbols=["BTC-251226-110000-C"], levels=5))
+        service._handle_raw_message(json.dumps(make_options_depth_payload()))
+
+        with self.assertRaises(ValueError):
+            service.get_latest_level_quote("BTC-251226-110000-C", level=0)
+        with self.assertRaises(ValueError):
+            service.get_latest_level_quote("BTC-251226-110000-C", level=6)
+        with self.assertRaises(ValueError):
+            service.get_latest_level_value("BTC-251226-110000-C", side="middle")
+        with self.assertRaises(ValueError):
+            service.get_latest_level_value("BTC-251226-110000-C", side="bid", field="size")
+        with self.assertRaises(ValueError):
+            service.get_latest_level_quote("BTC-251226-110000-C", max_age_ms=-1)
 
     def test_build_options_depth_service_configs_chunks_streams(self):
         configs = build_options_depth_service_configs(

@@ -18,7 +18,16 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 from .errors import BinanceDepthResponseError, DepthServiceError
-from .models import utc_now_ms
+from .models import (
+    DepthLevelQuote,
+    DepthSide,
+    DepthValueField,
+    normalize_depth_side,
+    normalize_depth_value_field,
+    utc_now_ms,
+    validate_depth_level,
+    validate_max_age_ms,
+)
 
 DepthLevel = Literal[5, 10, 20]
 DepthSpeedMs = Literal[100, 250, 500]
@@ -56,6 +65,28 @@ class DepthSnapshot:
     sequence_gap: bool
     stale_reason: Optional[str] = None
     stale_since_ms: Optional[int] = None
+
+    def get_level_quote(self, level: int = 1) -> DepthLevelQuote:
+        level = validate_depth_level(level)
+        bid = self.bids[level - 1] if level <= len(self.bids) else None
+        ask = self.asks[level - 1] if level <= len(self.asks) else None
+
+        return DepthLevelQuote(
+            symbol=self.symbol,
+            level=level,
+            bid_price=bid.price if bid is not None else None,
+            bid_qty=bid.qty if bid is not None else None,
+            ask_price=ask.price if ask is not None else None,
+            ask_qty=ask.qty if ask is not None else None,
+            event_time_ms=self.event_time_ms,
+            transaction_time_ms=self.transaction_time_ms,
+            local_recv_time_ms=self.local_recv_time_ms,
+            receive_latency_ms=self.receive_latency_ms,
+            final_update_id=self.final_update_id,
+            is_stale=self.is_stale,
+            sequence_gap=self.sequence_gap,
+            depth_incomplete=None,
+        )
 
 
 @dataclass(frozen=True)
@@ -184,6 +215,53 @@ class BinanceFuturesDepthService:
     def get_latest_snapshot(self, symbol: str) -> Optional[DepthSnapshot]:
         return self.get_latest(symbol)
 
+    def get_latest_level_quote(
+        self,
+        symbol: str,
+        level: int = 1,
+        *,
+        require_not_stale: bool = True,
+        require_sequence_continuity: bool = False,
+        max_age_ms: Optional[int] = None,
+    ) -> Optional[DepthLevelQuote]:
+        level = validate_depth_level(level, max_level=int(self.config.levels))
+        max_age_ms = validate_max_age_ms(max_age_ms)
+        snapshot = self.get_latest(symbol)
+        if snapshot is None:
+            return None
+        if not self._snapshot_passes_level_filters(
+            snapshot,
+            require_not_stale=require_not_stale,
+            require_sequence_continuity=require_sequence_continuity,
+            max_age_ms=max_age_ms,
+        ):
+            return None
+        return snapshot.get_level_quote(level)
+
+    def get_latest_level_value(
+        self,
+        symbol: str,
+        side: DepthSide,
+        level: int = 1,
+        field: DepthValueField = "price",
+        *,
+        require_not_stale: bool = True,
+        require_sequence_continuity: bool = False,
+        max_age_ms: Optional[int] = None,
+    ) -> Optional[Decimal]:
+        normalized_side = normalize_depth_side(side)
+        normalized_field = normalize_depth_value_field(field)
+        quote = self.get_latest_level_quote(
+            symbol,
+            level=level,
+            require_not_stale=require_not_stale,
+            require_sequence_continuity=require_sequence_continuity,
+            max_age_ms=max_age_ms,
+        )
+        if quote is None:
+            return None
+        return quote.value(normalized_side, normalized_field)
+
     def get_all_latest(self) -> dict[str, DepthSnapshot]:
         with self._lock:
             return dict(self._snapshots)
@@ -226,6 +304,22 @@ class BinanceFuturesDepthService:
         if self.config.speed_ms == 250:
             return stream
         return f"{stream}@{self.config.speed_ms}ms"
+
+    @staticmethod
+    def _snapshot_passes_level_filters(
+        snapshot: DepthSnapshot,
+        *,
+        require_not_stale: bool,
+        require_sequence_continuity: bool,
+        max_age_ms: Optional[int],
+    ) -> bool:
+        if require_not_stale and snapshot.is_stale:
+            return False
+        if require_sequence_continuity and snapshot.sequence_gap:
+            return False
+        if max_age_ms is not None and utc_now_ms() - snapshot.local_recv_time_ms > max_age_ms:
+            return False
+        return True
 
     def _wait_until_ready(self, timeout: Optional[float]) -> None:
         wait_timeout = self.config.startup_timeout_seconds if timeout is None else timeout
