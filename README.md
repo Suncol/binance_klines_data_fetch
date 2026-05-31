@@ -130,6 +130,93 @@ finally:
 
 The depth service uses Binance USD-M Futures partial book depth streams, not diff-depth local order book reconstruction. Supported `levels` values are `5`, `10`, and `20`; supported `speed_ms` values are `100`, `250`, and `500`. `speed_ms=250` maps to the no-suffix stream name such as `btcusdt@depth5`. The service keeps only the latest in-memory snapshot per symbol and marks snapshots stale on disconnect, timeout, or stop. It does not write CSV, Parquet, database rows, or any periodic sampler output.
 
+## Binance Options Symbols
+
+```python
+from decimal import Decimal
+
+from binance_klines_data_fetch import (
+    build_options_combined_stream_urls,
+    build_options_depth_streams,
+    filter_options,
+    get_option_universe,
+    select_near_atm_options,
+    select_nearest_expiries,
+)
+
+universe = get_option_universe()
+
+btc_trading = filter_options(
+    universe,
+    underlying="BTCUSDT",
+    status="TRADING",
+)
+nearest_expiry = select_nearest_expiries(btc_trading, count=1)[0]
+nearest_expiry_options = filter_options(btc_trading, expiry=nearest_expiry)
+selected = select_near_atm_options(
+    nearest_expiry_options,
+    spot=Decimal("105000"),
+    n_strikes_each_side=5,
+)
+
+streams = build_options_depth_streams(selected, levels=5, speed_ms=100)
+urls = build_options_combined_stream_urls(streams)
+
+print([opt.symbol for opt in selected][:5])
+print(urls[0])
+```
+
+Options symbol discovery uses Binance Options `GET /eapi/v1/exchangeInfo` from `https://eapi.binance.com` and reads official `optionSymbols` fields such as `symbol`, `expiryDate`, `strikePrice`, `side`, `underlying`, `status`, `priceScale`, `quantityScale`, and filters. Symbol strings follow the Binance format `<BASE>-<YYMMDD>-<STRIKE>-<C|P>`, for example `BTC-251226-110000-C`, but production code should not hand-build symbols. Fetch the official universe, keep `status == "TRADING"`, then construct Options WebSocket depth streams as `{symbol.lower()}@depth5@100ms`.
+
+Options partial depth supports `levels` values `5`, `10`, and `20`, and `speed_ms` values `100` and `500`. Options combined stream URLs use `wss://fstream.binance.com/public/stream?streams=...` and are split at Binance's 200 streams per connection limit.
+
+## Binance Options Top-N Depth Background Cache
+
+```python
+from decimal import Decimal
+
+from binance_klines_data_fetch import (
+    BinanceOptionsDepthConfig,
+    BinanceOptionsDepthService,
+    filter_options,
+    get_option_universe,
+    select_near_atm_options,
+    select_nearest_expiries,
+)
+
+universe = get_option_universe()
+btc_trading = filter_options(universe, underlying="BTCUSDT", status="TRADING")
+nearest_expiry = select_nearest_expiries(btc_trading, count=1)[0]
+near_expiry = filter_options(btc_trading, expiry=nearest_expiry)
+selected = select_near_atm_options(
+    near_expiry,
+    spot=Decimal("105000"),
+    n_strikes_each_side=2,
+)
+
+service = BinanceOptionsDepthService(
+    BinanceOptionsDepthConfig(
+        symbols=selected,
+        levels=5,
+        speed_ms=100,
+    )
+)
+service.start(block_until_ready=True)
+
+try:
+    snapshot = service.get_latest(selected[0].symbol)
+    if snapshot is not None and not snapshot.is_stale and not snapshot.sequence_gap:
+        bid1 = snapshot.bids[0] if len(snapshot.bids) > 0 else None
+        bid2 = snapshot.bids[1] if len(snapshot.bids) > 1 else None
+        ask1 = snapshot.asks[0] if len(snapshot.asks) > 0 else None
+        ask2 = snapshot.asks[1] if len(snapshot.asks) > 1 else None
+        print(snapshot.symbol, bid1, bid2, ask1, ask2, snapshot.depth_incomplete)
+finally:
+    service.stop()
+```
+
+The Options depth service uses Binance Options partial book depth streams. It stores the latest in-memory top-N snapshot per option symbol and tracks sequence gaps with `U/u/pu`. Options order books are often thin, so `depth_incomplete=True` is normal and does not prevent readiness; always check `len(snapshot.bids)` and `len(snapshot.asks)` before reading bid2 or ask2.
+
 ## Returned DataFrame
 
 - Index: UTC `DatetimeIndex`, name `Open_Time`, ascending.

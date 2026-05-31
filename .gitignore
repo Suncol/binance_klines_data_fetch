@@ -2,7 +2,12 @@
 !.gitignore
 !binance_klines_data_fetch/
 !binance_klines_data_fetch/depth.py
+!binance_klines_data_fetch/options.py
+!binance_klines_data_fetch/options_depth.py
 !tests/
 !tests/test_depth.py
+!tests/test_options.py
+!tests/test_options_depth.py
 !examples/
 !examples/depth_service_jupyter_example.ipynb
+!examples/options_depth_service_jupyter_example.ipynb

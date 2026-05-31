@@ -21,6 +21,29 @@ from .errors import (
     KlineServiceError,
 )
 from .multi_service import MultiSymbolKlineService
+from .options import (
+    BinanceOptionsClient,
+    OptionDepthLevel,
+    OptionDepthSpeedMs,
+    OptionSymbol,
+    OptionType,
+    build_options_combined_stream_urls,
+    build_options_depth_streams,
+    filter_options,
+    get_option_universe,
+    get_trading_option_symbols,
+    parse_option_symbol_record,
+    select_near_atm_options,
+    select_nearest_expiries,
+)
+from .options_depth import (
+    BinanceOptionsDepthConfig,
+    BinanceOptionsDepthService,
+    OptionDepthPriceLevel,
+    OptionsDepthServiceStatus,
+    OptionsDepthSnapshot,
+    build_options_depth_service_configs,
+)
 from .rate_limiter import RateLimitError, WeightedRateLimiter, kline_request_weight
 from .service import BinanceKlineService
 from .symbols import (
@@ -38,6 +61,9 @@ __all__ = [
     "BinanceKlineClient",
     "BinanceKlineError",
     "BinanceKlineService",
+    "BinanceOptionsClient",
+    "BinanceOptionsDepthConfig",
+    "BinanceOptionsDepthService",
     "BinanceRequestError",
     "BinanceResponseError",
     "DepthLevel",
@@ -48,12 +74,28 @@ __all__ = [
     "DepthSnapshot",
     "KlineServiceError",
     "MultiSymbolKlineService",
+    "OptionDepthLevel",
+    "OptionDepthPriceLevel",
+    "OptionDepthSpeedMs",
+    "OptionSymbol",
+    "OptionType",
+    "OptionsDepthServiceStatus",
+    "OptionsDepthSnapshot",
     "RateLimitError",
     "WeightedRateLimiter",
+    "build_options_combined_stream_urls",
+    "build_options_depth_service_configs",
+    "build_options_depth_streams",
     "fetch_recent_closed_1m_klines",
+    "filter_options",
+    "get_option_universe",
+    "get_trading_option_symbols",
     "get_um_futures_classification_maps",
     "get_um_perpetual_symbol_info",
     "get_um_perpetual_symbols",
     "kline_request_weight",
     "klines_to_dataframe",
+    "parse_option_symbol_record",
+    "select_near_atm_options",
+    "select_nearest_expiries",
 ]
