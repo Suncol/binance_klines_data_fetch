@@ -466,15 +466,10 @@ class BinanceFuturesDepthService:
                     stale_reason=reason,
                     stale_since_ms=now_ms,
                 )
-            self._update_ready_event_locked()
+            self._ready_event.clear()
 
     def _update_ready_event_locked(self) -> None:
-        ready = all(
-            (snapshot := self._snapshots.get(symbol)) is not None
-            and not snapshot.is_stale
-            and not snapshot.sequence_gap
-            for symbol in self.config.symbols
-        )
+        ready = self._connected and self._last_error is None and not self._stop_event.is_set()
         if ready:
             self._ready_event.set()
         else:

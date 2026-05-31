@@ -128,7 +128,7 @@ finally:
     service.stop()
 ```
 
-The depth service uses Binance USD-M Futures partial book depth streams, not diff-depth local order book reconstruction. Supported `levels` values are `5`, `10`, and `20`; supported `speed_ms` values are `100`, `250`, and `500`. `speed_ms=250` maps to the no-suffix stream name such as `btcusdt@depth5`. The service keeps only the latest in-memory snapshot per symbol and marks snapshots stale on disconnect, timeout, or stop. It does not write CSV, Parquet, database rows, or any periodic sampler output.
+The depth service uses Binance USD-M Futures partial book depth streams, not diff-depth local order book reconstruction. Supported `levels` values are `5`, `10`, and `20`; supported `speed_ms` values are `100`, `250`, and `500`. `speed_ms=250` maps to the no-suffix stream name such as `btcusdt@depth5`. The service keeps only the latest in-memory snapshot per symbol and marks snapshots stale on disconnect, timeout, or stop. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. Always check `get_latest(symbol)` and the snapshot-level `is_stale` / `sequence_gap` flags before using a specific symbol. The service does not write CSV, Parquet, database rows, or any periodic sampler output.
 
 ## Binance Options Symbols
 
@@ -215,7 +215,7 @@ finally:
     service.stop()
 ```
 
-The Options depth service uses Binance Options partial book depth streams. It stores the latest in-memory top-N snapshot per option symbol and tracks sequence gaps with `U/u/pu`. Options order books are often thin, so `depth_incomplete=True` is normal and does not prevent readiness; always check `len(snapshot.bids)` and `len(snapshot.asks)` before reading bid2 or ask2.
+The Options depth service uses Binance Options partial book depth streams. It stores the latest in-memory top-N snapshot per option symbol and tracks sequence gaps with `U/u/pu`. `status().ready` is a connection-level flag: it means the WebSocket is connected and has no current connection error. A thin or inactive option can still have no snapshot yet, so always check `get_latest(symbol)` before using a specific contract. Options order books are often thin, so `depth_incomplete=True` is normal; always check `len(snapshot.bids)` and `len(snapshot.asks)` before reading bid2 or ask2.
 
 ## Returned DataFrame
 

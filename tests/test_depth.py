@@ -108,8 +108,23 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
         with self.assertRaises(BinanceDepthResponseError):
             service._parse_depth_message("{not-json")
 
+    def test_connected_status_controls_readiness_without_snapshots(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT", "ETHUSDT"], levels=5))
+
+        self.assertFalse(service.is_ready)
+
+        service._record_connected()
+
+        self.assertTrue(service.is_ready)
+        self.assertEqual(service.get_all_latest(), {})
+
+        service._set_connected(False)
+
+        self.assertFalse(service.is_ready)
+
     def test_sequence_gap_sets_flag_until_next_contiguous_message(self):
         service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
+        service._record_connected()
 
         service._handle_raw_message(json.dumps(make_depth_payload(final_update_id=12, previous_final_update_id=9)))
         first = service.get_latest("BTCUSDT")
@@ -124,7 +139,7 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
         self.assertIsNotNone(second)
         self.assertTrue(second.sequence_gap)
         self.assertFalse(second.is_stale)
-        self.assertFalse(service.is_ready)
+        self.assertTrue(service.is_ready)
 
         service._handle_raw_message(
             json.dumps(make_depth_payload(first_update_id=15, final_update_id=16, previous_final_update_id=14))
@@ -136,6 +151,7 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
 
     def test_stale_marking_keeps_last_snapshot_but_clears_readiness(self):
         service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
+        service._record_connected()
         service._handle_raw_message(json.dumps(make_depth_payload()))
 
         service._mark_all_stale("connection_closed")

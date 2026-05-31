@@ -192,8 +192,25 @@ class BinanceOptionsDepthServiceTests(unittest.TestCase):
         with self.assertRaises(BinanceDepthResponseError):
             service._parse_depth_message(json.dumps({**make_options_depth_payload(), "b": "bad"}))
 
+    def test_connected_status_controls_readiness_without_snapshots(self):
+        service = BinanceOptionsDepthService(
+            BinanceOptionsDepthConfig(symbols=["BTC-251226-110000-C", "BTC-251226-110000-P"], levels=5)
+        )
+
+        self.assertFalse(service.is_ready)
+
+        service._record_connected()
+
+        self.assertTrue(service.is_ready)
+        self.assertEqual(service.get_all_latest(), {})
+
+        service._set_connected(False)
+
+        self.assertFalse(service.is_ready)
+
     def test_sequence_gap_sets_flag_until_next_contiguous_message(self):
         service = BinanceOptionsDepthService(BinanceOptionsDepthConfig(symbols=["BTC-251226-110000-C"], levels=5))
+        service._record_connected()
 
         service._handle_raw_message(json.dumps(make_options_depth_payload(final_update_id=12, previous_final_update_id=9)))
         first = service.get_latest("btc-251226-110000-c")
@@ -209,7 +226,7 @@ class BinanceOptionsDepthServiceTests(unittest.TestCase):
         self.assertIsNotNone(second)
         self.assertTrue(second.sequence_gap)
         self.assertFalse(second.is_stale)
-        self.assertFalse(service.is_ready)
+        self.assertTrue(service.is_ready)
 
         service._handle_raw_message(
             json.dumps(make_options_depth_payload(first_update_id=15, final_update_id=16, previous_final_update_id=14))
@@ -221,6 +238,7 @@ class BinanceOptionsDepthServiceTests(unittest.TestCase):
 
     def test_stale_marking_keeps_last_snapshot_but_clears_readiness(self):
         service = BinanceOptionsDepthService(BinanceOptionsDepthConfig(symbols=["BTC-251226-110000-C"], levels=5))
+        service._record_connected()
         service._handle_raw_message(json.dumps(make_options_depth_payload()))
 
         service._mark_all_stale("connection_closed")
