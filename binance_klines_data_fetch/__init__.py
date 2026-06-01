@@ -20,7 +20,7 @@ from .errors import (
     DepthServiceError,
     KlineServiceError,
 )
-from .models import DepthLevelQuote, DepthSide, DepthValueField
+from .models import DepthFrameNumericType, DepthLevelQuote, DepthSide, DepthValueField
 from .multi_service import MultiSymbolKlineService
 from .options import (
     BinanceOptionsClient,
@@ -68,6 +68,7 @@ __all__ = [
     "BinanceRequestError",
     "BinanceResponseError",
     "DepthLevel",
+    "DepthFrameNumericType",
     "DepthLevelQuote",
     "DepthPriceLevel",
     "DepthSide",

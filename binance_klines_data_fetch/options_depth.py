@@ -21,9 +21,11 @@ from websockets.exceptions import ConnectionClosed
 
 from .errors import BinanceDepthResponseError, DepthServiceError
 from .models import (
+    DepthFrameNumericType,
     DepthLevelQuote,
     DepthSide,
     DepthValueField,
+    normalize_depth_frame_numeric_type,
     normalize_depth_side,
     normalize_depth_value_field,
     utc_now_ms,
@@ -274,12 +276,14 @@ class BinanceOptionsDepthService:
         include_status: bool = True,
         require_sequence_continuity: bool = False,
         max_age_ms: Optional[int] = None,
+        numeric_type: DepthFrameNumericType = "decimal",
     ) -> pd.DataFrame:
         frame_levels = validate_depth_level(
             levels if levels is not None else int(self.config.levels),
             max_level=int(self.config.levels),
         )
         max_age_ms = validate_max_age_ms(max_age_ms)
+        numeric_type = normalize_depth_frame_numeric_type(numeric_type)
         rows = [
             self._depth_frame_row(
                 symbol,
@@ -287,6 +291,7 @@ class BinanceOptionsDepthService:
                 include_status=include_status,
                 require_sequence_continuity=require_sequence_continuity,
                 max_age_ms=max_age_ms,
+                numeric_type=numeric_type,
             )
             for symbol in self.config.symbols
         ]
@@ -359,9 +364,11 @@ class BinanceOptionsDepthService:
         include_status: bool,
         require_sequence_continuity: bool,
         max_age_ms: Optional[int],
+        numeric_type: DepthFrameNumericType,
     ) -> dict[str, Any]:
         snapshot = self.get_latest(symbol)
         has_snapshot = snapshot is not None
+        transaction_time_ms = np.nan if snapshot is None else snapshot.transaction_time_ms
         is_stale = True if snapshot is None else snapshot.is_stale
         sequence_gap = False if snapshot is None else snapshot.sequence_gap
         depth_incomplete = True if snapshot is None else snapshot.depth_incomplete
@@ -376,14 +383,20 @@ class BinanceOptionsDepthService:
         )
 
         row: dict[str, Any] = {}
-        for level in range(1, levels + 1):
-            if can_use_numeric_data:
-                quote = snapshot.get_level_quote(level)
-                row[f"bid{level}"] = _decimal_or_nan(quote.bid_price)
-                row[f"bid{level}_qty"] = _decimal_or_nan(quote.bid_qty)
-                row[f"ask{level}"] = _decimal_or_nan(quote.ask_price)
-                row[f"ask{level}_qty"] = _decimal_or_nan(quote.ask_qty)
-            else:
+        if can_use_numeric_data:
+            assert snapshot is not None
+            bids = snapshot.bids
+            asks = snapshot.asks
+            for level in range(1, levels + 1):
+                index = level - 1
+                bid = bids[index] if index < len(bids) else None
+                ask = asks[index] if index < len(asks) else None
+                row[f"bid{level}"] = _depth_frame_value(bid.price if bid is not None else None, numeric_type)
+                row[f"bid{level}_qty"] = _depth_frame_value(bid.qty if bid is not None else None, numeric_type)
+                row[f"ask{level}"] = _depth_frame_value(ask.price if ask is not None else None, numeric_type)
+                row[f"ask{level}_qty"] = _depth_frame_value(ask.qty if ask is not None else None, numeric_type)
+        else:
+            for level in range(1, levels + 1):
                 row[f"bid{level}"] = np.nan
                 row[f"bid{level}_qty"] = np.nan
                 row[f"ask{level}"] = np.nan
@@ -393,6 +406,7 @@ class BinanceOptionsDepthService:
             row.update(
                 {
                     "has_snapshot": has_snapshot,
+                    "transaction_time_ms": transaction_time_ms,
                     "is_stale": is_stale,
                     "sequence_gap": sequence_gap,
                     "depth_incomplete": depth_incomplete,
@@ -712,8 +726,12 @@ def _normalize_option_symbols(symbols: Iterable[str | OptionSymbol]) -> tuple[st
     return tuple(normalized_symbols)
 
 
-def _decimal_or_nan(value: Optional[Decimal]) -> Decimal | float:
-    return value if value is not None else np.nan
+def _depth_frame_value(value: Optional[Decimal], numeric_type: DepthFrameNumericType) -> Decimal | float:
+    if value is None:
+        return np.nan
+    if numeric_type == "float":
+        return float(value)
+    return value
 
 
 def _parse_price_qty_array(

@@ -8,6 +8,8 @@
 !tests/test_depth.py
 !tests/test_options.py
 !tests/test_options_depth.py
+!benchmarks/
+!benchmarks/depth_frame_benchmark.py
 !examples/
 !examples/depth_service_jupyter_example.ipynb
 !examples/options_depth_service_jupyter_example.ipynb

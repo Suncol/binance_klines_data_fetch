@@ -4,6 +4,7 @@ import json
 import unittest
 from dataclasses import replace
 from decimal import Decimal
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -266,6 +267,7 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
                 "ask2",
                 "ask2_qty",
                 "has_snapshot",
+                "transaction_time_ms",
                 "is_stale",
                 "sequence_gap",
                 "depth_incomplete",
@@ -274,15 +276,49 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
         self.assertEqual(frame.loc["BTCUSDT", "bid1"], Decimal("101.0"))
         self.assertEqual(frame.loc["BTCUSDT", "bid1_qty"], Decimal("2.5"))
         self.assertEqual(frame.loc["BTCUSDT", "ask2"], Decimal("102.0"))
+        self.assertEqual(frame["bid1"].dtype, object)
+        self.assertEqual(frame["bid1_qty"].dtype, object)
+        self.assertEqual(frame["ask2"].dtype, object)
         self.assertTrue(frame.loc["BTCUSDT", "has_snapshot"])
+        self.assertEqual(frame.loc["BTCUSDT", "transaction_time_ms"], 1_700_000_000_000)
         self.assertFalse(frame.loc["BTCUSDT", "is_stale"])
         self.assertFalse(frame.loc["BTCUSDT", "sequence_gap"])
         self.assertFalse(frame.loc["BTCUSDT", "depth_incomplete"])
         self.assertTrue(pd.isna(frame.loc["ETHUSDT", "bid1"]))
         self.assertTrue(pd.isna(frame.loc["ETHUSDT", "ask2_qty"]))
         self.assertFalse(frame.loc["ETHUSDT", "has_snapshot"])
+        self.assertTrue(pd.isna(frame.loc["ETHUSDT", "transaction_time_ms"]))
         self.assertTrue(frame.loc["ETHUSDT", "is_stale"])
         self.assertTrue(frame.loc["ETHUSDT", "depth_incomplete"])
+
+    def test_latest_depth_frame_reads_snapshot_levels_directly(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
+        service._handle_raw_message(json.dumps(make_depth_payload()))
+
+        with patch.object(
+            DepthSnapshot,
+            "get_level_quote",
+            side_effect=AssertionError("get_latest_depth_frame should not allocate DepthLevelQuote"),
+        ):
+            frame = service.get_latest_depth_frame(levels=2)
+
+        self.assertEqual(frame.loc["BTCUSDT", "bid1"], Decimal("101.0"))
+        self.assertEqual(frame.loc["BTCUSDT", "bid2_qty"], Decimal("1.5"))
+        self.assertEqual(frame.loc["BTCUSDT", "ask1"], Decimal("101.5"))
+        self.assertEqual(frame.loc["BTCUSDT", "ask2_qty"], Decimal("1.0"))
+
+    def test_latest_depth_frame_can_return_decimal_numeric_values(self):
+        service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT", "ETHUSDT"], levels=5))
+        service._handle_raw_message(json.dumps(make_depth_payload()))
+
+        frame = service.get_latest_depth_frame(levels=2)
+
+        self.assertEqual(frame.loc["BTCUSDT", "bid1"], Decimal("101.0"))
+        self.assertEqual(frame.loc["BTCUSDT", "bid2_qty"], Decimal("1.5"))
+        self.assertEqual(frame.loc["BTCUSDT", "ask1"], Decimal("101.5"))
+        self.assertEqual(frame.loc["BTCUSDT", "ask2_qty"], Decimal("1.0"))
+        self.assertTrue(pd.isna(frame.loc["ETHUSDT", "bid1"]))
+        self.assertEqual(frame["bid1"].dtype, object)
 
     def test_latest_depth_frame_uses_nan_for_stale_gap_and_age_filters(self):
         service = BinanceFuturesDepthService(BinanceDepthConfig(symbols=["BTCUSDT"], levels=5))
@@ -294,6 +330,7 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
 
         self.assertTrue(pd.isna(stale_frame.loc["BTCUSDT", "bid1"]))
         self.assertTrue(stale_frame.loc["BTCUSDT", "has_snapshot"])
+        self.assertEqual(stale_frame.loc["BTCUSDT", "transaction_time_ms"], 1_700_000_000_000)
         self.assertTrue(stale_frame.loc["BTCUSDT", "is_stale"])
 
         service._handle_raw_message(
@@ -302,6 +339,7 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
         gap_frame = service.get_latest_depth_frame(levels=1, require_sequence_continuity=True)
 
         self.assertTrue(pd.isna(gap_frame.loc["BTCUSDT", "bid1"]))
+        self.assertEqual(gap_frame.loc["BTCUSDT", "transaction_time_ms"], 1_700_000_000_000)
         self.assertTrue(gap_frame.loc["BTCUSDT", "sequence_gap"])
 
         snapshot = service.get_latest("BTCUSDT")
@@ -310,6 +348,7 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
         old_frame = service.get_latest_depth_frame(levels=1, max_age_ms=1)
 
         self.assertTrue(pd.isna(old_frame.loc["BTCUSDT", "bid1"]))
+        self.assertEqual(old_frame.loc["BTCUSDT", "transaction_time_ms"], 1_700_000_000_000)
         self.assertFalse(old_frame.loc["BTCUSDT", "is_stale"])
 
     def test_latest_depth_frame_options(self):
@@ -326,6 +365,12 @@ class BinanceFuturesDepthServiceTests(unittest.TestCase):
             service.get_latest_depth_frame(levels=6)
         with self.assertRaises(ValueError):
             service.get_latest_depth_frame(max_age_ms=-1)
+        with self.assertRaises(ValueError):
+            service.get_latest_depth_frame(numeric_type="int")
+
+        upper_case_frame = service.get_latest_depth_frame(levels=1, numeric_type="FLOAT")
+        self.assertEqual(upper_case_frame.loc["BTCUSDT", "bid1"], 101.0)
+        self.assertTrue(pd.api.types.is_float_dtype(upper_case_frame["bid1"]))
 
 
 if __name__ == "__main__":

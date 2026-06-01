@@ -60,6 +60,7 @@ NUMERIC_KLINE_COLUMNS = [
 
 DepthSide = Literal["bid", "ask"]
 DepthValueField = Literal["price", "qty"]
+DepthFrameNumericType = Literal["float", "decimal"]
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,15 @@ def normalize_depth_value_field(field: str) -> DepthValueField:
     if normalized not in {"price", "qty"}:
         raise ValueError("field must be 'price' or 'qty'")
     return cast(DepthValueField, normalized)
+
+
+def normalize_depth_frame_numeric_type(numeric_type: str) -> DepthFrameNumericType:
+    if not isinstance(numeric_type, str):
+        raise ValueError("numeric_type must be 'float' or 'decimal'")
+    normalized = numeric_type.strip().lower()
+    if normalized not in {"float", "decimal"}:
+        raise ValueError("numeric_type must be 'float' or 'decimal'")
+    return cast(DepthFrameNumericType, normalized)
 
 
 def validate_depth_level(level: int, *, max_level: Optional[int] = None) -> int:
